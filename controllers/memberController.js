@@ -261,10 +261,65 @@ const deleteMember = async (req, res) => {
     }
 };
 
+// @desc    Update current member profile
+// @route   PUT /api/members/profile
+// @access  Member
+const updateMemberProfile = async (req, res) => {
+    try {
+        const member = await Member.findOne({ user: req.user.id });
+
+        if (!member) {
+            return res.status(404).json({
+                success: false,
+                message: 'Member profile not found'
+            });
+        }
+
+        const { name, email, phone } = req.body;
+
+        // Update fields
+        if (name) member.name = name;
+        if (email) member.email = email.toLowerCase();
+        if (phone) member.phone = phone;
+
+        await member.save();
+
+        // Update linked User account
+        if (member.user) {
+            const userUpdate = {};
+            if (name) userUpdate.name = name;
+            if (email) userUpdate.email = email.toLowerCase();
+
+            if (Object.keys(userUpdate).length > 0) {
+                await User.findByIdAndUpdate(member.user, userUpdate);
+            }
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Profile updated successfully',
+            data: member
+        });
+    } catch (error) {
+        console.error('Update member profile error:', error);
+        if (error.code === 11000) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email already exists'
+            });
+        }
+        res.status(500).json({
+            success: false,
+            message: 'Error updating profile'
+        });
+    }
+};
+
 module.exports = {
     getMembers,
     createMember,
     updateMember,
     deleteMember,
-    getMemberProfile
+    getMemberProfile,
+    updateMemberProfile
 };

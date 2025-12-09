@@ -329,10 +329,63 @@ const resetPassword = async (req, res) => {
     }
 };
 
+// @desc    Update password
+// @route   PUT /api/auth/update-password
+// @access  Private
+const updatePassword = async (req, res) => {
+    try {
+        const { currentPassword, newPassword, confirmPassword } = req.body;
+
+        // Validate input
+        if (!currentPassword || !newPassword || !confirmPassword) {
+            return res.status(400).json({
+                success: false,
+                message: 'Please provide current password, new password, and confirm password'
+            });
+        }
+
+        // Validate password confirmation
+        if (newPassword !== confirmPassword) {
+            return res.status(400).json({
+                success: false,
+                message: 'New passwords do not match'
+            });
+        }
+
+        // Get user (with password)
+        const user = await User.findById(req.user.id);
+
+        // Check current password
+        const isMatch = await user.comparePassword(currentPassword);
+        if (!isMatch) {
+            return res.status(401).json({
+                success: false,
+                message: 'Incorrect current password'
+            });
+        }
+
+        // Update password
+        user.password = newPassword;
+        await user.save();
+
+        res.status(200).json({
+            success: true,
+            message: 'Password updated successfully'
+        });
+    } catch (error) {
+        console.error('Update password error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error updating password'
+        });
+    }
+};
+
 module.exports = {
     register,
     login,
     forgotPassword,
     verifyOTP,
-    resetPassword
+    resetPassword,
+    updatePassword
 };

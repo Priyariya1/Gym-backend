@@ -249,6 +249,63 @@ const getTrainerClasses = async (req, res) => {
     }
 };
 
+// @desc    Update current trainer profile
+// @route   PUT /api/trainers/profile
+// @access  Trainer
+const updateTrainerProfile = async (req, res) => {
+    try {
+        const trainer = await Trainer.findOne({ user: req.user.id });
+
+        if (!trainer) {
+            return res.status(404).json({
+                success: false,
+                message: 'Trainer profile not found'
+            });
+        }
+
+        const { name, email, phone, specialization, bio, experience } = req.body;
+
+        // Update fields
+        if (name) trainer.name = name;
+        if (email) trainer.email = email.toLowerCase();
+        if (phone) trainer.phone = phone;
+        if (specialization) trainer.specialization = specialization;
+        if (bio) trainer.bio = bio;
+        if (experience) trainer.experience = experience;
+
+        await trainer.save();
+
+        // Update linked User account
+        if (trainer.user) {
+            const userUpdate = {};
+            if (name) userUpdate.name = name;
+            if (email) userUpdate.email = email.toLowerCase();
+
+            if (Object.keys(userUpdate).length > 0) {
+                await User.findByIdAndUpdate(trainer.user, userUpdate);
+            }
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Profile updated successfully',
+            data: trainer
+        });
+    } catch (error) {
+        console.error('Update trainer profile error:', error);
+        if (error.code === 11000) {
+            return res.status(400).json({
+                success: false,
+                message: 'Email already exists'
+            });
+        }
+        res.status(500).json({
+            success: false,
+            message: 'Error updating profile'
+        });
+    }
+};
+
 module.exports = {
     getTrainers,
     getTrainer,
@@ -256,5 +313,6 @@ module.exports = {
     updateTrainer,
     deleteTrainer,
     getTrainerProfile,
-    getTrainerClasses
+    getTrainerClasses,
+    updateTrainerProfile
 };

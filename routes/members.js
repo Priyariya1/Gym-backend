@@ -6,7 +6,8 @@ const {
     createMember,
     updateMember,
     deleteMember,
-    getMemberProfile
+    getMemberProfile,
+    updateMemberProfile
 } = require('../controllers/memberController');
 
 // All routes require authentication
@@ -14,6 +15,9 @@ router.use(authenticateToken);
 
 // @route   GET /api/members/profile
 router.get('/profile', requireMember, getMemberProfile);
+
+// @route   PUT /api/members/profile
+router.put('/profile', requireMember, updateMemberProfile);
 
 // @route   GET /api/members
 router.get('/', requireTrainer, getMembers);

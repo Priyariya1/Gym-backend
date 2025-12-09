@@ -8,7 +8,8 @@ const {
     updateTrainer,
     deleteTrainer,
     getTrainerProfile,
-    getTrainerClasses
+    getTrainerClasses,
+    updateTrainerProfile
 } = require('../controllers/trainerController');
 
 // Public routes (or protected?)
@@ -20,6 +21,7 @@ router.use(authenticateToken);
 
 // Trainer Profile (Self)
 router.get('/profile', requireTrainer, getTrainerProfile);
+router.put('/profile', requireTrainer, updateTrainerProfile);
 router.get('/classes', requireTrainer, getTrainerClasses);
 
 // Admin Routes
