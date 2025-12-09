@@ -7,20 +7,22 @@ const {
     updateSession,
     cancelSession
 } = require('../controllers/sessionController');
+const validate = require('../middleware/validate');
+const { createSessionSchema } = require('../validators/sessionValidator');
 
 // All routes require authentication
 router.use(authenticateToken);
 
-// @route   GET /api/sessions
+// GET /api/sessions
 router.get('/', getSessions);
 
-// @route   POST /api/sessions
-router.post('/', requireAdmin, createSession);
+// POST /api/sessions
+router.post('/', requireAdmin, validate(createSessionSchema), createSession);
 
-// @route   PUT /api/sessions/:id
+// PUT /api/sessions/:id
 router.put('/:id', requireAdmin, updateSession);
 
-// @route   PUT /api/sessions/:id/cancel
+// PUT /api/sessions/:id/cancel
 router.put('/:id/cancel', requireAdmin, cancelSession);
 
 module.exports = router;

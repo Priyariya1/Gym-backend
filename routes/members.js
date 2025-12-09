@@ -9,26 +9,28 @@ const {
     getMemberProfile,
     updateMemberProfile
 } = require('../controllers/memberController');
+const validate = require('../middleware/validate');
+const { createMemberSchema, updateMemberSchema } = require('../validators/memberValidator');
 
 // All routes require authentication
 router.use(authenticateToken);
 
-// @route   GET /api/members/profile
+//  GET /api/members/profile
 router.get('/profile', requireMember, getMemberProfile);
 
-// @route   PUT /api/members/profile
-router.put('/profile', requireMember, updateMemberProfile);
+// PUT /api/members/profile
+router.put('/profile', requireMember, validate(updateMemberSchema), updateMemberProfile);
 
-// @route   GET /api/members
+// GET /api/members
 router.get('/', requireTrainer, getMembers);
 
-// @route   POST /api/members
-router.post('/', requireAdmin, createMember);
+// POST /api/members
+router.post('/', requireAdmin, validate(createMemberSchema), createMember);
 
-// @route   PUT /api/members/:id
-router.put('/:id', requireAdmin, updateMember);
+// PUT /api/members/:id
+router.put('/:id', requireAdmin, validate(updateMemberSchema), updateMember);
 
-// @route   DELETE /api/members/:id
+// DELETE /api/members/:id
 router.delete('/:id', requireAdmin, deleteMember);
 
 module.exports = router;

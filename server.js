@@ -10,6 +10,7 @@ const sessionRoutes = require('./routes/sessions');
 const attendanceRoutes = require('./routes/attendance');
 const dashboardRoutes = require('./routes/dashboard');
 const trainerRoutes = require('./routes/trainers');
+const userRoutes = require('./routes/users');
 
 // Initialize express app
 const app = express();
@@ -46,6 +47,7 @@ app.use('/api/sessions', sessionRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/trainers', trainerRoutes);
+app.use('/api/users', userRoutes);
 
 // 404 handler
 app.use((req, res) => {

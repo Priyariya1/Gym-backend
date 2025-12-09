@@ -11,6 +11,8 @@ const {
     getTrainerClasses,
     updateTrainerProfile
 } = require('../controllers/trainerController');
+const validate = require('../middleware/validate');
+const { createTrainerSchema, updateTrainerSchema } = require('../validators/trainerValidator');
 
 // Public routes (or protected?)
 // Let's make getTrainers public so visitors can see trainers? Or protected?
@@ -21,14 +23,14 @@ router.use(authenticateToken);
 
 // Trainer Profile (Self)
 router.get('/profile', requireTrainer, getTrainerProfile);
-router.put('/profile', requireTrainer, updateTrainerProfile);
+router.put('/profile', requireTrainer, validate(updateTrainerSchema), updateTrainerProfile);
 router.get('/classes', requireTrainer, getTrainerClasses);
 
 // Admin Routes
 router.get('/', requireAdmin, getTrainers);
-router.post('/', requireAdmin, createTrainer);
+router.post('/', requireAdmin, validate(createTrainerSchema), createTrainer);
 router.get('/:id', requireAdmin, getTrainer); // Admin viewing specific trainer
-router.put('/:id', requireAdmin, updateTrainer);
+router.put('/:id', requireAdmin, validate(updateTrainerSchema), updateTrainer);
 router.delete('/:id', requireAdmin, deleteTrainer);
 
 module.exports = router;
