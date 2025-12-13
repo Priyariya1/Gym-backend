@@ -21,8 +21,16 @@ router.get('/profile', requireMember, getMemberProfile);
 // PUT /api/members/profile
 router.put('/profile', requireMember, validate(updateMemberSchema), updateMemberProfile);
 
-// GET /api/members
-router.get('/', requireTrainer, getMembers);
+// GET /api/members (Admin and Trainer can view)
+router.get('/', (req, res, next) => {
+    if (req.user.role === 'admin' || req.user.role === 'trainer') {
+        return next();
+    }
+    return res.status(403).json({
+        success: false,
+        message: 'Access denied. Admin or Trainer role required.'
+    });
+}, getMembers);
 
 // POST /api/members
 router.post('/', requireAdmin, validate(createMemberSchema), createMember);

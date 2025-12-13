@@ -1,5 +1,7 @@
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 const User = require('../models/User');
+const Member = require('../models/Member');
 const OTP = require('../models/OTP');
 const { sendOTPEmail } = require('../utils/sendEmail');
 
@@ -8,13 +10,29 @@ const { sendOTPEmail } = require('../utils/sendEmail');
 // @access  Public
 const register = async (req, res) => {
     try {
-        const { name, email, password, confirmPassword, role } = req.body;
+        const {
+            name,
+            email,
+            phone,
+            password,
+            confirmPassword,
+            role,
+            // Trainee-specific fields
+            membershipStartDate,
+            membershipEndDate,
+            plan,
+            class: className,
+            classType,
+            difficultyLevel,
+            age,
+            weight
+        } = req.body;
 
         // Validate input
-        if (!name || !email || !password || !confirmPassword) {
+        if (!name || !email || !phone || !password || !confirmPassword) {
             return res.status(400).json({
                 success: false,
-                message: 'Please provide name, email, password, and confirm password'
+                message: 'Please provide name, email, phone, password, and confirm password'
             });
         }
 
@@ -27,11 +45,32 @@ const register = async (req, res) => {
         }
 
         // Validate role if provided
-        if (role && !['admin', 'trainer', 'member'].includes(role)) {
+        const userRole = role || 'member';
+        if (!['admin', 'trainer', 'member'].includes(userRole)) {
             return res.status(400).json({
                 success: false,
                 message: 'Invalid role. Must be "admin", "trainer", or "member"'
             });
+        }
+
+        // For trainees, validate required fields
+        if (userRole === 'member') {
+            if (!membershipStartDate || !membershipEndDate || !plan || !className) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'For trainees, please provide membership start date, end date, plan, and class'
+                });
+            }
+
+            // Validate dates
+            const startDate = new Date(membershipStartDate);
+            const endDate = new Date(membershipEndDate);
+            if (endDate <= startDate) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Membership end date must be after start date'
+                });
+            }
         }
 
         // Check if user already exists
@@ -44,13 +83,63 @@ const register = async (req, res) => {
             });
         }
 
-        // Create user (default role is 'member' if not specified)
+        // Check if member already exists (for member role)
+        if (userRole === 'member') {
+            const existingMember = await Member.findOne({ email: email.toLowerCase() });
+            if (existingMember) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'A member with this email already exists'
+                });
+            }
+        }
+
+        // Create user
         const user = await User.create({
             name,
             email: email.toLowerCase(),
+            phone,
             password,
-            role: role || 'member'
+            role: userRole
         });
+
+        // If trainee, create member record with auto-calculated next billing date
+        if (userRole === 'member') {
+            const startDate = new Date(membershipStartDate);
+            const nextBillingDate = new Date(startDate);
+            nextBillingDate.setDate(nextBillingDate.getDate() + 30); // 30 days from start date
+
+            try {
+                await Member.create({
+                    user: user._id,
+                    name,
+                    email: email.toLowerCase(),
+                    phone,
+                    age: age ? parseInt(age) : undefined,
+                    weight: weight ? parseFloat(weight) : undefined,
+                    membershipStartDate: startDate,
+                    membershipEndDate: new Date(membershipEndDate),
+                    plan,
+                    class: className,
+                    classType: classType || 'Cardio',
+                    difficultyLevel: difficultyLevel || 'Beginner',
+                    status: 'active',
+                    nextBillingDate: nextBillingDate
+                });
+            } catch (memberError) {
+                // If member creation fails, delete the user to maintain consistency
+                await User.findByIdAndDelete(user._id);
+
+                // Handle duplicate key error specifically
+                if (memberError.code === 11000) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'A member with this email already exists'
+                    });
+                }
+                throw memberError; // Re-throw if it's a different error
+            }
+        }
 
         // Generate JWT token
         const token = jwt.sign(
@@ -68,12 +157,23 @@ const register = async (req, res) => {
                     id: user._id,
                     name: user.name,
                     email: user.email,
+                    phone: user.phone,
                     role: user.role
                 }
             }
         });
     } catch (error) {
         console.error('Registration error:', error);
+
+        // Handle duplicate key errors with more specific messages
+        if (error.code === 11000) {
+            const field = Object.keys(error.keyPattern || {})[0] || 'email';
+            return res.status(400).json({
+                success: false,
+                message: `A user with this ${field} already exists`
+            });
+        }
+
         res.status(500).json({
             success: false,
             message: 'Server error during registration'
@@ -309,9 +409,16 @@ const resetPassword = async (req, res) => {
             });
         }
 
-        // Update password
-        user.password = newPassword;
-        await user.save();
+        // Hash the new password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+        // Update password using findByIdAndUpdate to avoid validation issues
+        await User.findByIdAndUpdate(
+            user._id,
+            { password: hashedPassword },
+            { runValidators: false }
+        );
 
         // Delete used OTP
         await OTP.deleteOne({ _id: otpRecord._id });
@@ -355,6 +462,13 @@ const updatePassword = async (req, res) => {
         // Get user (with password)
         const user = await User.findById(req.user.id);
 
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
         // Check current password
         const isMatch = await user.comparePassword(currentPassword);
         if (!isMatch) {
@@ -364,9 +478,16 @@ const updatePassword = async (req, res) => {
             });
         }
 
-        // Update password
-        user.password = newPassword;
-        await user.save();
+        // Hash the new password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+        // Update password using findByIdAndUpdate to avoid validation issues
+        await User.findByIdAndUpdate(
+            user._id,
+            { password: hashedPassword },
+            { runValidators: false }
+        );
 
         res.status(200).json({
             success: true,
@@ -381,11 +502,51 @@ const updatePassword = async (req, res) => {
     }
 };
 
+// @desc    Get current logged in user
+// @route   GET /api/auth/me
+// @access  Private
+const getMe = async (req, res) => {
+    try {
+        const user = await User.findById(req.user.id);
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: 'User not found'
+            });
+        }
+
+        let memberData = null;
+        if (user.role === 'member') {
+            memberData = await Member.findOne({ user: user._id });
+        }
+
+        res.status(200).json({
+            success: true,
+            data: {
+                id: user._id,
+                name: user.name,
+                email: user.email,
+                phone: user.phone,
+                role: user.role,
+                memberDetails: memberData
+            }
+        });
+    } catch (error) {
+        console.error('Get me error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Server error'
+        });
+    }
+};
+
 module.exports = {
     register,
     login,
     forgotPassword,
     verifyOTP,
     resetPassword,
-    updatePassword
+    updatePassword,
+    getMe
 };

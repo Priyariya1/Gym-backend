@@ -6,7 +6,8 @@ const {
     forgotPassword,
     verifyOTP,
     resetPassword,
-    updatePassword
+    updatePassword,
+    getMe
 } = require('../controllers/authController');
 const { authenticateToken } = require('../middleware/auth');
 const validate = require('../middleware/validate');
@@ -29,5 +30,8 @@ router.post('/reset-password', resetPassword);
 
 // @route   PUT /api/auth/update-password
 router.put('/update-password', authenticateToken, validate(updatePasswordSchema), updatePassword);
+
+// @route   GET /api/auth/me
+router.get('/me', authenticateToken, getMe);
 
 module.exports = router;

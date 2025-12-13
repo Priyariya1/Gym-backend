@@ -1,62 +1,220 @@
 const Member = require('../models/Member');
 const User = require('../models/User');
+const Trainer = require('../models/Trainer');
+const { sendCredentialsEmail } = require('../utils/sendEmail');
+const crypto = require('crypto');
 
-// @desc    Get all members with search and filter
+// @desc    Get all users (Admins, Trainers, Members) with their roles
 // @route   GET /api/members
-// @access  Protected
+// @access  Protected (Admin/Trainer)
 const getMembers = async (req, res) => {
     try {
-        const { search, status } = req.query;
-        let query = {};
+        const { search, status, role } = req.query;
 
-        // Search by name or email
+        // Build user query
+        let userQuery = {};
         if (search) {
-            query.$or = [
+            userQuery.$or = [
                 { name: { $regex: search, $options: 'i' } },
                 { email: { $regex: search, $options: 'i' } }
             ];
         }
-
-        // Filter by status (DB field)
-        if (status && ['active', 'inactive', 'pending'].includes(status)) {
-            query.status = status;
+        if (role && ['admin', 'trainer', 'member'].includes(role)) {
+            userQuery.role = role;
         }
 
-        // Get members
-        let members = await Member.find(query).sort({ createdAt: -1 });
+        // Get all users
+        const users = await User.find(userQuery).select('-password').sort({ createdAt: -1 });
+        
+        // Get user IDs for filtering
+        const userIds = users.map(u => u._id);
+        
+        // Get members and trainers only for the filtered users
+        const members = await Member.find({ user: { $in: userIds } }).populate('user', 'name email role');
+        const trainers = await Trainer.find({ user: { $in: userIds } }).populate('user', 'name email role');
+        
+        // Create a map for quick lookup
+        const memberMap = new Map();
+        members.forEach(m => {
+            if (m.user && m.user._id) {
+                memberMap.set(m.user._id.toString(), m);
+            }
+        });
+        
+        const trainerMap = new Map();
+        trainers.forEach(t => {
+            if (t.user && t.user._id) {
+                trainerMap.set(t.user._id.toString(), t);
+            }
+        });
 
-        // Filter by expired status (virtual field)
+        // Combine users with their role-specific data
+        const usersWithDetails = users.map(user => {
+            const userObj = user.toObject();
+            const userId = user._id.toString();
+            
+            if (user.role === 'member' && memberMap.has(userId)) {
+                const memberData = memberMap.get(userId);
+                return {
+                    _id: user._id,
+                    name: user.name,
+                    email: user.email,
+                    role: user.role,
+                    phone: memberData.phone || '',
+                    plan: memberData.plan || '',
+                    status: memberData.status || 'active',
+                    isActive: memberData.isActive,
+                    membershipStartDate: memberData.membershipStartDate,
+                    membershipEndDate: memberData.membershipEndDate,
+                    nextBillingDate: memberData.nextBillingDate,
+                    class: memberData.class || '',
+                    classType: memberData.classType || '',
+                    difficultyLevel: memberData.difficultyLevel || '',
+                    createdAt: user.createdAt,
+                    updatedAt: user.updatedAt
+                };
+            } else if (user.role === 'trainer' && trainerMap.has(userId)) {
+                const trainerData = trainerMap.get(userId);
+                return {
+                    _id: user._id,
+                    name: user.name,
+                    email: user.email,
+                    role: user.role,
+                    phone: trainerData.phone || '',
+                    plan: '',
+                    status: 'active',
+                    isActive: true,
+                    membershipStartDate: null,
+                    membershipEndDate: null,
+                    nextBillingDate: null,
+                    createdAt: user.createdAt,
+                    updatedAt: user.updatedAt
+                };
+            } else if (user.role === 'admin') {
+                return {
+                    _id: user._id,
+                    name: user.name,
+                    email: user.email,
+                    role: user.role,
+                    phone: '',
+                    plan: '',
+                    status: 'active',
+                    isActive: true,
+                    membershipStartDate: null,
+                    membershipEndDate: null,
+                    nextBillingDate: null,
+                    createdAt: user.createdAt,
+                    updatedAt: user.updatedAt
+                };
+            }
+            
+            // Fallback for users without role-specific data
+            return {
+                _id: user._id,
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                phone: '',
+                plan: '',
+                status: 'active',
+                isActive: true,
+                membershipStartDate: null,
+                membershipEndDate: null,
+                nextBillingDate: null,
+                createdAt: user.createdAt,
+                updatedAt: user.updatedAt
+            };
+        });
+
+        // Apply status filter if provided
+        let filteredUsers = usersWithDetails;
+        if (status && ['active', 'inactive', 'expired'].includes(status)) {
         if (status === 'expired') {
-            members = members.filter(member => !member.isActive);
+                filteredUsers = usersWithDetails.filter(u => u.role === 'member' && !u.isActive);
+            } else if (status === 'active') {
+                filteredUsers = usersWithDetails.filter(u => u.isActive !== false);
+            } else if (status === 'inactive') {
+                filteredUsers = usersWithDetails.filter(u => u.isActive === false);
+            }
         }
 
         res.status(200).json({
             success: true,
-            count: members.length,
-            data: members
+            count: filteredUsers.length,
+            data: filteredUsers
         });
     } catch (error) {
         console.error('Get members error:', error);
         res.status(500).json({
             success: false,
-            message: 'Error fetching members'
+            message: 'Error fetching users'
         });
     }
 };
 
-// @desc    Create new member
+// Generate secure random password
+const generatePassword = () => {
+    const length = 12;
+    const charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*';
+    const randomBytes = crypto.randomBytes(length);
+    let password = '';
+    for (let i = 0; i < length; i++) {
+        password += charset[randomBytes[i] % charset.length];
+    }
+    return password;
+};
+
+// @desc    Create new user (Admin, Trainer, or Member)
 // @route   POST /api/members
-// @access  Protected
+// @access  Protected (Admin only)
 const createMember = async (req, res) => {
     try {
-        const { name, email, phone, membershipStartDate, membershipEndDate, plan, status, nextBillingDate } = req.body;
+        const { name, email, phone, role, membershipStartDate, membershipEndDate, plan, status, nextBillingDate, class: className, classType, difficultyLevel, age, weight } = req.body;
 
         // Validate required fields
-        if (!name || !email || !phone || !membershipStartDate || !membershipEndDate || !plan) {
+        if (!name || !email) {
             return res.status(400).json({
                 success: false,
-                message: 'Please provide all required fields'
+                message: 'Please provide name and email'
             });
+        }
+
+        // Validate role
+        const validRoles = ['admin', 'trainer', 'member'];
+        const userRole = role || 'member';
+        if (!validRoles.includes(userRole)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid role. Must be admin, trainer, or member'
+            });
+        }
+
+        // Phone is required for trainer and member, optional for admin
+        if ((userRole === 'trainer' || userRole === 'member') && !phone) {
+            return res.status(400).json({
+                success: false,
+                message: 'Phone number is required for trainers and members'
+            });
+        }
+
+        // For members, validate membership dates, plan, and class
+        if (userRole === 'member') {
+            if (!membershipStartDate || !membershipEndDate || !plan || !className) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Membership dates, plan, and class are required for members'
+                });
+            }
+
+            const startDate = new Date(membershipStartDate);
+            const endDate = new Date(membershipEndDate);
+
+            if (endDate <= startDate) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Membership end date must be after start date'
+                });
+            }
         }
 
         // Check if user already exists
@@ -68,56 +226,124 @@ const createMember = async (req, res) => {
             });
         }
 
-        // Validate dates
-        const startDate = new Date(membershipStartDate);
-        const endDate = new Date(membershipEndDate);
-
-        if (endDate <= startDate) {
+        // Check if member already exists (for member role)
+        if (userRole === 'member') {
+            const existingMember = await Member.findOne({ email: email.toLowerCase() });
+            if (existingMember) {
             return res.status(400).json({
                 success: false,
-                message: 'Membership end date must be after start date'
+                    message: 'A member with this email already exists'
             });
+            }
         }
+
+        // Generate secure password
+        const generatedPassword = generatePassword();
 
         // Create User account
         const user = await User.create({
             name,
             email: email.toLowerCase(),
-            password: 'password123', // Default password, should be changed by user
-            role: 'member'
+            phone: phone || '',
+            password: generatedPassword,
+            role: userRole
         });
 
-        // Create member
-        const member = await Member.create({
+        let createdRecord = null;
+
+        // Create role-specific records
+        if (userRole === 'member') {
+            const startDate = new Date(membershipStartDate);
+            const endDate = new Date(membershipEndDate);
+            
+            // Auto-calculate next billing date: 30 days from start date
+            const calculatedNextBillingDate = new Date(startDate);
+            calculatedNextBillingDate.setDate(calculatedNextBillingDate.getDate() + 30);
+            
+            try {
+                createdRecord = await Member.create({
             user: user._id,
             name,
             email: email.toLowerCase(),
             phone,
+            age: age ? parseInt(age) : undefined,
+            weight: weight ? parseFloat(weight) : undefined,
             membershipStartDate: startDate,
             membershipEndDate: endDate,
             plan,
+                    class: className,
+                    classType: classType || 'Cardio',
+                    difficultyLevel: difficultyLevel || 'Beginner',
             status: status || 'active',
-            nextBillingDate: nextBillingDate ? new Date(nextBillingDate) : undefined
-        });
+                    nextBillingDate: calculatedNextBillingDate
+                });
+            } catch (memberError) {
+                // If member creation fails, delete the user to maintain consistency
+                await User.findByIdAndDelete(user._id);
+                
+                // Handle duplicate key error specifically
+                if (memberError.code === 11000) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'A member with this email already exists'
+                    });
+                }
+                throw memberError; // Re-throw if it's a different error
+            }
+        } else if (userRole === 'trainer') {
+            try {
+                createdRecord = await Trainer.create({
+                    user: user._id,
+                    name,
+                    email: email.toLowerCase(),
+                    phone
+                });
+            } catch (trainerError) {
+                // If trainer creation fails, delete the user to maintain consistency
+                await User.findByIdAndDelete(user._id);
+                
+                // Handle duplicate key error specifically
+                if (trainerError.code === 11000) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'A trainer with this email already exists'
+                    });
+                }
+                throw trainerError; // Re-throw if it's a different error
+            }
+        } else if (userRole === 'admin') {
+            // Admin doesn't need additional record, just User
+            createdRecord = user;
+        }
+
+        // Send credentials email
+        try {
+            await sendCredentialsEmail(email, name, generatedPassword, userRole);
+        } catch (emailError) {
+            console.error('Failed to send credentials email:', emailError);
+            // Don't fail the request if email fails, but log it
+        }
 
         res.status(201).json({
             success: true,
-            message: 'Member created successfully. Default password is "password123"',
-            data: member
+            message: `${userRole.charAt(0).toUpperCase() + userRole.slice(1)} created successfully. Login credentials have been sent to ${email}`,
+            data: createdRecord
         });
     } catch (error) {
-        console.error('Create member error:', error);
+        console.error('Create user error:', error);
 
+        // Handle duplicate key errors with more specific messages
         if (error.code === 11000) {
+            const field = Object.keys(error.keyPattern || {})[0] || 'email';
             return res.status(400).json({
                 success: false,
-                message: 'Member with this email already exists'
+                message: `A user with this ${field} already exists`
             });
         }
 
         res.status(500).json({
             success: false,
-            message: 'Error creating member'
+            message: 'Error creating user'
         });
     }
 };
@@ -127,7 +353,7 @@ const createMember = async (req, res) => {
 // @access  Member
 const getMemberProfile = async (req, res) => {
     try {
-        const member = await Member.findOne({ user: req.user.id });
+        const member = await Member.findOne({ user: req.user.id }).populate('user', 'name email role');
 
         if (!member) {
             return res.status(404).json({
@@ -136,9 +362,32 @@ const getMemberProfile = async (req, res) => {
             });
         }
 
+        // Return member data with user info
+        const memberData = {
+            _id: member._id,
+            name: member.name,
+            email: member.email,
+            role: member.user?.role || 'member',
+            phone: member.phone || '',
+            age: member.age,
+            weight: member.weight,
+            plan: member.plan || '',
+            status: member.status || 'active',
+            isActive: member.isActive,
+            daysUntilExpiration: member.daysUntilExpiration,
+            membershipStartDate: member.membershipStartDate,
+            membershipEndDate: member.membershipEndDate,
+            nextBillingDate: member.nextBillingDate,
+            class: member.class || '',
+            classType: member.classType || '',
+            difficultyLevel: member.difficultyLevel || '',
+            createdAt: member.createdAt,
+            updatedAt: member.updatedAt
+        };
+
         res.status(200).json({
             success: true,
-            data: member
+            data: memberData
         });
     } catch (error) {
         console.error('Get member profile error:', error);
@@ -155,7 +404,7 @@ const getMemberProfile = async (req, res) => {
 const updateMember = async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, email, phone, membershipStartDate, membershipEndDate, plan, status, nextBillingDate } = req.body;
+        const { name, email, phone, membershipStartDate, membershipEndDate, plan, status, nextBillingDate, class: className, classType, difficultyLevel, age, weight } = req.body;
 
         // Find member
         const member = await Member.findById(id);
@@ -184,11 +433,16 @@ const updateMember = async (req, res) => {
         if (name) member.name = name;
         if (email) member.email = email.toLowerCase();
         if (phone) member.phone = phone;
+        if (age !== undefined) member.age = age ? parseInt(age) : null;
+        if (weight !== undefined) member.weight = weight ? parseFloat(weight) : null;
         if (membershipStartDate) member.membershipStartDate = new Date(membershipStartDate);
         if (membershipEndDate) member.membershipEndDate = new Date(membershipEndDate);
         if (plan) member.plan = plan;
         if (status) member.status = status;
         if (nextBillingDate) member.nextBillingDate = new Date(nextBillingDate);
+        if (className !== undefined) member.class = className;
+        if (classType !== undefined) member.classType = classType;
+        if (difficultyLevel !== undefined) member.difficultyLevel = difficultyLevel;
 
         await member.save();
 
@@ -275,12 +529,14 @@ const updateMemberProfile = async (req, res) => {
             });
         }
 
-        const { name, email, phone } = req.body;
+        const { name, email, phone, age, weight } = req.body;
 
         // Update fields
         if (name) member.name = name;
         if (email) member.email = email.toLowerCase();
         if (phone) member.phone = phone;
+        if (age !== undefined) member.age = age ? parseInt(age) : null;
+        if (weight !== undefined) member.weight = weight ? parseFloat(weight) : null;
 
         await member.save();
 

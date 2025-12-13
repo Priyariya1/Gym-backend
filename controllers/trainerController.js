@@ -76,6 +76,7 @@ const createTrainer = async (req, res) => {
         const user = await User.create({
             name,
             email: email.toLowerCase(),
+            phone,
             password: 'password123', // Default password
             role: 'trainer'
         });

@@ -4,6 +4,7 @@ const registerSchema = z.object({
     body: z.object({
         name: z.string().min(1, 'Name is required'),
         email: z.string().email('Invalid email address'),
+        phone: z.string().min(6, 'Phone is required'),
         password: z.string().min(6, 'Password must be at least 6 characters'),
         confirmPassword: z.string().min(6, 'Confirm password must be at least 6 characters'),
         role: z.enum(['admin', 'trainer', 'member']).optional()

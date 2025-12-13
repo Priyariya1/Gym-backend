@@ -21,6 +21,7 @@ const seedUsers = async () => {
             const admin = await User.create({
                 name: 'Admin User',
                 email: process.env.ADMIN_EMAIL || 'admin@gymmini.com',
+                phone: process.env.ADMIN_PHONE || '+10000000000',
                 password: process.env.ADMIN_PASSWORD || 'admin123',
                 role: 'admin'
             });
@@ -42,8 +43,9 @@ const seedUsers = async () => {
             const user = await User.create({
                 name: 'Test User',
                 email: 'user@gymmini.com',
+                phone: '+10000000001',
                 password: 'user123',
-                role: 'user'
+                role: 'member'
             });
 
             console.log('✅ Test user created successfully');
