@@ -69,6 +69,13 @@ const memberSchema = new mongoose.Schema({
     },
     nextBillingDate: {
         type: Date
+    },
+    lastAttended: {
+        type: Date
+    },
+    totalAttendance: {
+        type: Number,
+        default: 0
     }
 }, {
     timestamps: true,

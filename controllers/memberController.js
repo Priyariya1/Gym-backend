@@ -25,14 +25,14 @@ const getMembers = async (req, res) => {
 
         // Get all users
         const users = await User.find(userQuery).select('-password').sort({ createdAt: -1 });
-        
+
         // Get user IDs for filtering
         const userIds = users.map(u => u._id);
-        
+
         // Get members and trainers only for the filtered users
         const members = await Member.find({ user: { $in: userIds } }).populate('user', 'name email role');
         const trainers = await Trainer.find({ user: { $in: userIds } }).populate('user', 'name email role');
-        
+
         // Create a map for quick lookup
         const memberMap = new Map();
         members.forEach(m => {
@@ -40,7 +40,7 @@ const getMembers = async (req, res) => {
                 memberMap.set(m.user._id.toString(), m);
             }
         });
-        
+
         const trainerMap = new Map();
         trainers.forEach(t => {
             if (t.user && t.user._id) {
@@ -52,7 +52,7 @@ const getMembers = async (req, res) => {
         const usersWithDetails = users.map(user => {
             const userObj = user.toObject();
             const userId = user._id.toString();
-            
+
             if (user.role === 'member' && memberMap.has(userId)) {
                 const memberData = memberMap.get(userId);
                 return {
@@ -107,7 +107,7 @@ const getMembers = async (req, res) => {
                     updatedAt: user.updatedAt
                 };
             }
-            
+
             // Fallback for users without role-specific data
             return {
                 _id: user._id,
@@ -128,13 +128,15 @@ const getMembers = async (req, res) => {
 
         // Apply status filter if provided
         let filteredUsers = usersWithDetails;
-        if (status && ['active', 'inactive', 'expired'].includes(status)) {
-        if (status === 'expired') {
+        if (status && ['active', 'inactive', 'expired', 'pending'].includes(status)) {
+            if (status === 'expired') {
                 filteredUsers = usersWithDetails.filter(u => u.role === 'member' && !u.isActive);
             } else if (status === 'active') {
-                filteredUsers = usersWithDetails.filter(u => u.isActive !== false);
+                filteredUsers = usersWithDetails.filter(u => u.status === 'active' || (u.isActive !== false && u.status !== 'pending'));
             } else if (status === 'inactive') {
-                filteredUsers = usersWithDetails.filter(u => u.isActive === false);
+                filteredUsers = usersWithDetails.filter(u => u.status === 'inactive' || (u.isActive === false && u.status !== 'pending'));
+            } else if (status === 'pending') {
+                filteredUsers = usersWithDetails.filter(u => u.status === 'pending');
             }
         }
 
@@ -230,10 +232,10 @@ const createMember = async (req, res) => {
         if (userRole === 'member') {
             const existingMember = await Member.findOne({ email: email.toLowerCase() });
             if (existingMember) {
-            return res.status(400).json({
-                success: false,
+                return res.status(400).json({
+                    success: false,
                     message: 'A member with this email already exists'
-            });
+                });
             }
         }
 
@@ -255,32 +257,32 @@ const createMember = async (req, res) => {
         if (userRole === 'member') {
             const startDate = new Date(membershipStartDate);
             const endDate = new Date(membershipEndDate);
-            
+
             // Auto-calculate next billing date: 30 days from start date
             const calculatedNextBillingDate = new Date(startDate);
             calculatedNextBillingDate.setDate(calculatedNextBillingDate.getDate() + 30);
-            
+
             try {
                 createdRecord = await Member.create({
-            user: user._id,
-            name,
-            email: email.toLowerCase(),
-            phone,
-            age: age ? parseInt(age) : undefined,
-            weight: weight ? parseFloat(weight) : undefined,
-            membershipStartDate: startDate,
-            membershipEndDate: endDate,
-            plan,
+                    user: user._id,
+                    name,
+                    email: email.toLowerCase(),
+                    phone,
+                    age: age ? parseInt(age) : undefined,
+                    weight: weight ? parseFloat(weight) : undefined,
+                    membershipStartDate: startDate,
+                    membershipEndDate: endDate,
+                    plan,
                     class: className,
                     classType: classType || 'Cardio',
                     difficultyLevel: difficultyLevel || 'Beginner',
-            status: status || 'active',
+                    status: status || 'active',
                     nextBillingDate: calculatedNextBillingDate
                 });
             } catch (memberError) {
                 // If member creation fails, delete the user to maintain consistency
                 await User.findByIdAndDelete(user._id);
-                
+
                 // Handle duplicate key error specifically
                 if (memberError.code === 11000) {
                     return res.status(400).json({
@@ -301,7 +303,7 @@ const createMember = async (req, res) => {
             } catch (trainerError) {
                 // If trainer creation fails, delete the user to maintain consistency
                 await User.findByIdAndDelete(user._id);
-                
+
                 // Handle duplicate key error specifically
                 if (trainerError.code === 11000) {
                     return res.status(400).json({
@@ -401,23 +403,69 @@ const getMemberProfile = async (req, res) => {
 // @desc    Update member
 // @route   PUT /api/members/:id
 // @access  Protected
+// @desc    Update member/user
+// @route   PUT /api/members/:id
+// @access  Protected
 const updateMember = async (req, res) => {
     try {
         const { id } = req.params;
         const { name, email, phone, membershipStartDate, membershipEndDate, plan, status, nextBillingDate, class: className, classType, difficultyLevel, age, weight } = req.body;
 
-        // Find member
-        const member = await Member.findById(id);
+        let user = await User.findById(id);
+        let member = null;
+        let trainer = null;
 
-        if (!member) {
+        // If found by User ID
+        if (user) {
+            if (user.role === 'member') {
+                member = await Member.findOne({ user: user._id });
+                // Self-healing: Create member if missing
+                if (!member) {
+                    console.log(`Creating missing Member record for user ${user._id}`);
+                    member = new Member({
+                        user: user._id,
+                        name: user.name,
+                        email: user.email,
+                        // Set defaults or use provided values
+                        membershipStartDate: membershipStartDate || new Date(),
+                        membershipEndDate: membershipEndDate || new Date(),
+                        plan: plan || 'Standard',
+                        status: status || 'active',
+                        class: className || '',
+                        classType: classType || 'Cardio',
+                        difficultyLevel: difficultyLevel || 'Beginner'
+                    });
+                }
+            } else if (user.role === 'trainer') {
+                trainer = await Trainer.findOne({ user: user._id });
+                // Self-healing: Create trainer if missing
+                if (!trainer) {
+                    console.log(`Creating missing Trainer record for user ${user._id}`);
+                    trainer = new Trainer({
+                        user: user._id,
+                        name: user.name,
+                        email: user.email,
+                        phone: phone || ''
+                    });
+                }
+            }
+        } else {
+            // Fallback: Try to find by Member ID (legacy support)
+            member = await Member.findById(id);
+            if (member) {
+                user = await User.findById(member.user);
+            }
+        }
+
+        if (!user && !member) {
             return res.status(404).json({
                 success: false,
-                message: 'Member not found'
+                message: 'User/Member not found'
             });
         }
 
-        // Validate dates if provided
-        if (membershipStartDate && membershipEndDate) {
+        // Validate dates if provided (only for members)
+        if ((member || user?.role === 'member') && membershipStartDate && membershipEndDate) {
             const startDate = new Date(membershipStartDate);
             const endDate = new Date(membershipEndDate);
 
@@ -429,38 +477,44 @@ const updateMember = async (req, res) => {
             }
         }
 
-        // Update fields
-        if (name) member.name = name;
-        if (email) member.email = email.toLowerCase();
-        if (phone) member.phone = phone;
-        if (age !== undefined) member.age = age ? parseInt(age) : null;
-        if (weight !== undefined) member.weight = weight ? parseFloat(weight) : null;
-        if (membershipStartDate) member.membershipStartDate = new Date(membershipStartDate);
-        if (membershipEndDate) member.membershipEndDate = new Date(membershipEndDate);
-        if (plan) member.plan = plan;
-        if (status) member.status = status;
-        if (nextBillingDate) member.nextBillingDate = new Date(nextBillingDate);
-        if (className !== undefined) member.class = className;
-        if (classType !== undefined) member.classType = classType;
-        if (difficultyLevel !== undefined) member.difficultyLevel = difficultyLevel;
+        // Update User fields
+        if (user) {
+            if (name) user.name = name;
+            if (email) user.email = email.toLowerCase();
+            if (phone) user.phone = phone; // Phone is stored in User too
+            await user.save();
+        }
 
-        await member.save();
+        // Update Member fields
+        if (member) {
+            if (name) member.name = name; // Sync name
+            if (email) member.email = email.toLowerCase(); // Sync email
+            if (phone) member.phone = phone;
+            if (age !== undefined) member.age = age ? parseInt(age) : null;
+            if (weight !== undefined) member.weight = weight ? parseFloat(weight) : null;
+            if (membershipStartDate) member.membershipStartDate = new Date(membershipStartDate);
+            if (membershipEndDate) member.membershipEndDate = new Date(membershipEndDate);
+            if (plan) member.plan = plan;
+            if (status) member.status = status;
+            if (nextBillingDate) member.nextBillingDate = new Date(nextBillingDate);
+            if (className !== undefined) member.class = className;
+            if (classType !== undefined) member.classType = classType;
+            if (difficultyLevel !== undefined) member.difficultyLevel = difficultyLevel;
+            await member.save();
+        }
 
-        // Update linked User account
-        if (member.user) {
-            const userUpdate = {};
-            if (name) userUpdate.name = name;
-            if (email) userUpdate.email = email.toLowerCase();
-
-            if (Object.keys(userUpdate).length > 0) {
-                await User.findByIdAndUpdate(member.user, userUpdate);
-            }
+        // Update Trainer fields
+        if (trainer) {
+            if (name) trainer.name = name; // Sync name
+            if (email) trainer.email = email.toLowerCase(); // Sync email
+            if (phone) trainer.phone = phone;
+            await trainer.save();
         }
 
         res.status(200).json({
             success: true,
-            message: 'Member updated successfully',
-            data: member
+            message: 'User updated successfully',
+            data: member || trainer || user
         });
     } catch (error) {
         console.error('Update member error:', error);
@@ -468,49 +522,73 @@ const updateMember = async (req, res) => {
         if (error.code === 11000) {
             return res.status(400).json({
                 success: false,
-                message: 'Member with this email already exists'
+                message: 'Email already exists'
             });
         }
 
         res.status(500).json({
             success: false,
-            message: 'Error updating member'
+            message: 'Error updating user'
         });
     }
 };
 
-// @desc    Delete member
+// @desc    Delete member/user
 // @route   DELETE /api/members/:id
 // @access  Protected
 const deleteMember = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const member = await Member.findById(id);
+        let user = await User.findById(id);
+        let member = null;
+        let trainer = null;
 
-        if (!member) {
+        // If found by User ID
+        if (user) {
+            if (user.role === 'member') {
+                member = await Member.findOne({ user: user._id });
+            } else if (user.role === 'trainer') {
+                trainer = await Trainer.findOne({ user: user._id });
+            }
+        } else {
+            // Fallback: Try to find by Member ID
+            member = await Member.findById(id);
+            if (member) {
+                user = await User.findById(member.user);
+            }
+        }
+
+        if (!user && !member) {
             return res.status(404).json({
                 success: false,
-                message: 'Member not found'
+                message: 'User/Member not found'
             });
         }
 
-        // Delete associated User if exists
-        if (member.user) {
-            await User.findByIdAndDelete(member.user);
+        // Delete associated records
+        if (member) {
+            await Member.findByIdAndDelete(member._id);
         }
 
-        await Member.findByIdAndDelete(id);
+        if (trainer) {
+            await Trainer.findByIdAndDelete(trainer._id);
+        }
+
+        // Delete User
+        if (user) {
+            await User.findByIdAndDelete(user._id);
+        }
 
         res.status(200).json({
             success: true,
-            message: 'Member deleted successfully'
+            message: 'User deleted successfully'
         });
     } catch (error) {
         console.error('Delete member error:', error);
         res.status(500).json({
             success: false,
-            message: 'Error deleting member'
+            message: 'Error deleting user'
         });
     }
 };

@@ -5,7 +5,7 @@ const Session = require('../models/Session');
 // @access  Protected
 const getSessions = async (req, res) => {
     try {
-        const { startDate, endDate, status } = req.query;
+        const { startDate, endDate, status, trainer } = req.query;
         let query = {};
 
         // Filter by date range
@@ -19,12 +19,19 @@ const getSessions = async (req, res) => {
             }
         }
 
+        // Filter by trainer
+        if (trainer) {
+            query.trainer = trainer;
+        }
+
         // Filter by status
         if (status) {
             query.status = status;
         }
 
-        const sessions = await Session.find(query).sort({ date: 1, startTime: 1 });
+        const sessions = await Session.find(query)
+            .populate('trainer', 'name email')
+            .sort({ date: 1, startTime: 1 });
 
         res.status(200).json({
             success: true,
@@ -55,6 +62,14 @@ const createSession = async (req, res) => {
             });
         }
 
+        // Validate trainer ID format
+        if (!trainer.match(/^[0-9a-fA-F]{24}$/)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid trainer ID format'
+            });
+        }
+
         // Validate capacity
         if (capacity < 1) {
             return res.status(400).json({
@@ -66,7 +81,7 @@ const createSession = async (req, res) => {
         // Create session
         const session = await Session.create({
             name,
-            trainer, // Assuming this is an ID now
+            trainer,
             date: new Date(date),
             startTime,
             capacity,
@@ -84,7 +99,7 @@ const createSession = async (req, res) => {
         console.error('Create session error:', error);
         res.status(500).json({
             success: false,
-            message: 'Error creating session'
+            message: error.message || 'Error creating session'
         });
     }
 };

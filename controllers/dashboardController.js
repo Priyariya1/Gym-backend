@@ -12,9 +12,15 @@ const getAdminStats = async (req, res) => {
         const activeMembers = await Member.countDocuments({ status: 'active' });
 
         // Expiring in 7 days
-        const nextWeek = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const nextWeek = new Date(today);
+        nextWeek.setDate(today.getDate() + 7);
+        nextWeek.setHours(23, 59, 59, 999);
+
         const expiringMembers = await Member.countDocuments({
-            membershipEndDate: { $lte: nextWeek, $gte: new Date() }
+            membershipEndDate: { $lte: nextWeek, $gte: today }
         });
 
         const weeklyClasses = await Session.countDocuments({

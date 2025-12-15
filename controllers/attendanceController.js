@@ -38,6 +38,23 @@ const markAttendance = async (req, res) => {
             { new: true, upsert: true }
         );
 
+        // Update member's lastAttended and totalAttendance
+        if (attendance.isPresent) {
+            // Count total attendance for this member
+            const totalAttendance = await Attendance.countDocuments({ memberId, isPresent: true });
+
+            await Member.findByIdAndUpdate(memberId, {
+                lastAttended: new Date(),
+                totalAttendance: totalAttendance
+            });
+        } else {
+            // If marked absent/not present, we should still update the count just in case
+            const totalAttendance = await Attendance.countDocuments({ memberId, isPresent: true });
+            await Member.findByIdAndUpdate(memberId, {
+                totalAttendance: totalAttendance
+            });
+        }
+
         res.status(200).json({
             success: true,
             message: 'Attendance marked successfully',
