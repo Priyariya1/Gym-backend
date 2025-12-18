@@ -7,6 +7,23 @@ const Session = require('../models/Session');
 // @access  Public (or Protected?)
 const getTrainers = async (req, res) => {
     try {
+        // Find all users with role 'trainer'
+        const trainerUsers = await User.find({ role: 'trainer' });
+
+        // For each trainer user, ensure they have a Trainer profile
+        for (const user of trainerUsers) {
+            const existingProfile = await Trainer.findOne({ user: user._id });
+            if (!existingProfile) {
+                console.log(`Creating missing Trainer profile for user: ${user.name} (${user.email})`);
+                await Trainer.create({
+                    user: user._id,
+                    name: user.name,
+                    email: user.email,
+                    phone: user.phone || 'N/A'
+                });
+            }
+        }
+
         const trainers = await Trainer.find().sort({ createdAt: -1 });
         res.status(200).json({
             success: true,

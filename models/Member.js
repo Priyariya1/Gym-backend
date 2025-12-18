@@ -53,7 +53,7 @@ const memberSchema = new mongoose.Schema({
     classType: {
         type: String,
         required: [true, 'Class type is required'],
-        enum: ['Cardio', 'Strength', 'Yoga'],
+        enum: ['Cardio', 'Strength', 'Yoga', 'Flexibility', 'HIIT', 'Other'],
         default: 'Cardio'
     },
     difficultyLevel: {

@@ -12,7 +12,7 @@ const createMemberSchema = z.object({
         membershipEndDate: z.string().datetime({ offset: true }).or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).optional(),
         plan: z.string().optional(),
         class: z.string().optional(),
-        classType: z.enum(['Cardio', 'Strength', 'Yoga']).optional(),
+        classType: z.enum(['Cardio', 'Strength', 'Yoga', 'Flexibility', 'HIIT', 'Other']).optional(),
         difficultyLevel: z.enum(['Beginner', 'Intermediate', 'Advanced']).optional(),
         status: z.enum(['active', 'inactive', 'pending']).optional(),
         nextBillingDate: z.string().datetime({ offset: true }).or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).optional()
@@ -30,7 +30,7 @@ const updateMemberSchema = z.object({
         membershipEndDate: z.string().datetime({ offset: true }).or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).optional(),
         plan: z.string().optional(),
         class: z.string().optional(),
-        classType: z.enum(['Cardio', 'Strength', 'Yoga']).optional(),
+        classType: z.enum(['Cardio', 'Strength', 'Yoga', 'Flexibility', 'HIIT', 'Other']).optional(),
         difficultyLevel: z.enum(['Beginner', 'Intermediate', 'Advanced']).optional(),
         status: z.enum(['active', 'inactive', 'pending']).optional(),
         nextBillingDate: z.string().datetime({ offset: true }).or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).optional()

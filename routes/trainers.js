@@ -27,7 +27,15 @@ router.put('/profile', requireTrainer, validate(updateTrainerSchema), updateTrai
 router.get('/classes', requireTrainer, getTrainerClasses);
 
 // Admin Routes
-router.get('/', requireAdmin, getTrainers);
+router.get('/', (req, res, next) => {
+    if (req.user.role === 'admin' || req.user.role === 'trainer') {
+        return next();
+    }
+    return res.status(403).json({
+        success: false,
+        message: 'Access denied. Admin or Trainer role required.'
+    });
+}, getTrainers);
 router.post('/', requireAdmin, validate(createTrainerSchema), createTrainer);
 router.get('/:id', requireAdmin, getTrainer); // Admin viewing specific trainer
 router.put('/:id', requireAdmin, validate(updateTrainerSchema), updateTrainer);

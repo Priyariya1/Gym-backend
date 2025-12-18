@@ -36,6 +36,38 @@ const getAdminStats = async (req, res) => {
         const totalCapacity = pastSessions.reduce((acc, session) => acc + (session.capacity || 0), 0);
         const totalAttendance = await Attendance.countDocuments({ isPresent: true });
 
+        // Calculate revenue trend (Last 7 days)
+        // Estimate based on member signups: Standard=$50, Plus=$80, Premium=$120
+        const revenueTrend = [];
+        const planPrices = {
+            'standard': 50,
+            'plus': 80,
+            'premium': 120
+        };
+
+        for (let i = 6; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            d.setHours(0, 0, 0, 0);
+
+            const nextDay = new Date(d);
+            nextDay.setDate(d.getDate() + 1);
+
+            const membersJoined = await Member.find({
+                createdAt: { $gte: d, $lt: nextDay }
+            });
+
+            const dailyRevenue = membersJoined.reduce((acc, member) => {
+                const plan = (member.plan || 'standard').toLowerCase();
+                return acc + (planPrices[plan] || 50);
+            }, 0);
+
+            revenueTrend.push({
+                label: d.toLocaleDateString('en-US', { weekday: 'short' }),
+                value: dailyRevenue
+            });
+        }
+
         const attendancePercentage = totalCapacity > 0
             ? Math.round((totalAttendance / totalCapacity) * 100)
             : 0;
@@ -48,7 +80,8 @@ const getAdminStats = async (req, res) => {
                 expiringMembers,
                 weeklyClasses,
                 totalAttendance,
-                attendancePercentage
+                attendancePercentage,
+                revenueTrend
             }
         });
     } catch (error) {
